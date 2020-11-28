@@ -1,13 +1,13 @@
 #############################################################################
-# Watchlist results compiler, check your watch list every weekend			#
-# 																			#
-# Written by: Diamond https://twitter.com/Diamond_Stock						#
-# Improvements to be made: Need to tighten up the rules on the weekly close #
-#                          range to consider market downtrends. Feel free to#
-#						    @ me with more ideas   							#
+# Watchlist results compiler, check your watch list every weekend			
+# 																			
+# Written by: Diamond https://twitter.com/Diamond_Stock						
+# Improvements to be made: Need to tighten up the rules on the weekly close 
+#                          range to consider market downtrends. Feel free to
+#						    @ me with more ideas   							
 #						             
-# version 1.3																#
-#																			#
+# version 1.3																
+#																			
 #############################################################################
 
 import datetime as dt
