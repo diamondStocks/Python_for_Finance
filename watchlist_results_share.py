@@ -39,7 +39,6 @@ ftypes = [("CSV Files","*.csv"),(".xlsm","*.xlsx",".xls")]
 ttl  = "Watchlist Import"
 dir1 = 'C:\\USE\\YOUR\\DIR\\HERE'
 filePath = askopenfilename(filetypes = ftypes, initialdir = dir1, title = ttl)
-# filePath =r"C:\Users\patpr\Desktop\test\watch_list_results\2020-09-25-watchlist.csv"
 stockList = pd.read_csv(filePath)
 
 ## Enter in your saved path
