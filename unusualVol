@@ -1,0 +1,127 @@
+
+#############################################################################################################
+# I am not a CS Programmer, so save me any messages saying how lame my scripting skillz are, I already know #
+# and I have a post-it note on my mirror to remind me every day, so rest easy.								#
+#Follow me on Twitter if you want to help out: @Diamond_Stock												#
+# This is strictly using the SP500, you can swap anything in there 											#
+#############################################################################################################
+
+
+import yahoo_fin.stock_info as si
+import pandas as pd
+from pandas_datareader import data as pdr
+from tqdm import tqdm
+import datetime as dt
+import yfinance as yf
+import numpy as np
+import os
+
+#use yahoo finance override to grab the data. If you're getting jsn errors, it probably needs to be updated via pip
+yf.pdr_override()
+
+tickers_list = []
+
+#cool lib I found to grab ticker. Check out more detail here: http://theautomatic.net/yahoo_fin-documentation/
+sp500_tickers = si.tickers_sp500()
+
+#append the symbols to the previous established list
+tickers_list.extend(sp500_tickers)
+
+#establish a time frame. Since its just looking for unusual volume we need a month to get proper 20d rolling avg. If want 50d moving avg for volume just swap the comment lines
+now = dt.datetime.now()
+
+#20d avg
+start = now - dt.timedelta(weeks = 4)
+#50d avg
+#start = now - dt.timedelta(weeks = 10)
+
+#User input section to make the script a bit more dynamic if you want to look back across a day or a week
+numberCheck = False
+while numberCheck==False:
+	try:
+		#The int () function here will error if you put in a letter, so the while loop will continue until you enter a valid number
+		look_back = int(input("How Many Days to Look back?: "))
+		numberCheck = True
+
+	except ValueError:
+		print('Please Enter a Number')
+
+#Here's the fun part Mass download all the data instead of just forlooping a query, super cool, but returns a multi level Dataframe
+data = yf.download(tickers_list,start = start, end = now, group_by = 'ticker', threads = True)
+
+#Breaks the Multiframe down into one large data frame with symbols bunched up by ticker name. If you print this now, it will be a massive list with 4 weeks of data per stock all stuck into one dataframe
+data = data.stack(level=0).rename_axis(['Date','Ticker']).reset_index(level=1)
+
+#Now we group the symbols together so we can actually read the data properly
+group = data.groupby("Ticker")
+
+#Things get delisted or change sometimes. This will pull all the error symbols out. We do this to filter later in order to not have an error inside our forloop
+missing = list(yf.shared._ERRORS.keys())
+
+#Thanks stack overflow for this super pythonic filter, as you can see I def did not come up with this line haha
+filterTickers = [x for x in tickers_list if x not in missing]
+
+#Levels of standard dev to loop over
+std_mult =[2,4,6,8,10] 
+
+#Dictionary in order to store our info in a readable format
+std_dict = {}
+
+
+#Looping over all our STD entries here
+for i in std_mult:
+	temp_list = []
+
+	for each in tqdm(filterTickers):
+		stock = each.upper()
+
+		#The get group command is awesome and why we grouped the names earlier, now we can grab a single dataframe per ticker from our massive data frame list
+		df = group.get_group(stock)
+		close = df['Adj Close'].iloc[-1]
+		open_d = df['Open'].iloc[-1]
+		percentChange = ((close-open_d)/open_d)*100
+
+		#I personally don't trade symbols under 5 and usually its 10 dollars, change this if you want. Its basically saying if the last close was under 5
+		#Then continue back at the top of the for loop and dont bother with the stock
+		if close < 5:
+			continue
+
+		#Here's the STD math section from numpy, which makes life very easy. Im not a mathmatician if you havent noticed
+		vol_std =np.std(df['Volume'])
+		vol_mean = np.mean(df['Volume'])
+
+		#Filter the dataframe down to how far back you want to look, established by the user input
+		df_filter = df.tail(look_back)
+		
+		#Establish what "Large Vol" is based off the volume std (volitility really) and the STD number we are looping over
+		outlier_vol = vol_std * i
+		max_limit = vol_mean+outlier_vol
+
+		#The real filter on the filtered data frame, not confusing...
+		for x in df_filter.index:
+			vol = df_filter["Volume"][x]
+			mf = vol_mean*close
+			if max_limit < vol:
+				#here is another filter of mine, I want AT LEAST 15 mil money flow and if Im looking back one day, I want the change to be positive
+				if look_back == 1:
+					if mf > 15000000 and percentChange >= 0.1:
+						temp_list.append(stock)
+				else:
+					if mf > 15000000:
+						temp_list.append(stock)
+						break
+	# Fun way to make a dymanic dictionary based on the loop, which is pretty cool. IF youre into that
+	std_dict['STD of '+ str(i)] = temp_list
+
+#Establish empty print message
+output = ''
+
+#Seed out the empty message by looping over the dictionary we created
+for key, value in std_dict.items() :
+    output+= key +": \n"
+    for each in value:
+    	output+= each + " "
+    output+="\n"
+
+#Hey you did it. Thanks for reading this far.
+print(output)
