@@ -1,0 +1,141 @@
+import yahoo_fin.stock_info as si
+import pandas as pd
+from pandas_datareader import data as pdr
+from tqdm import tqdm
+import datetime as dt
+import yfinance as yf
+import pyperclip as pc
+import os
+
+#Removes some annoying warnings due to not adhearing to the constant format changes of altering Panadas Data Frame
+pd.options.mode.chained_assignment = None  # default='warn'
+
+
+yf.pdr_override()
+
+
+tickers_list = []
+numberCheck = False
+
+#User input check to look back for RS
+
+while numberCheck==False:
+	try:
+		user_filter = int(input("Minimum RSNHBP needed to make list: "))
+		amount_weeks = int(input("Amount of weeks to back check: "))
+		lookBack = int(input("How many months to look back (Smaller Number is more recent RS defualt to 3 or 6 is normal): "))
+		numberCheck = True
+
+	except ValueError:
+		print('Please Enter a Number')
+
+#cool lib I found to grab ticker. Check out more detail here: http://theautomatic.net/yahoo_fin-documentation/
+sp500_tickers = si.tickers_sp500()
+
+#append the symbols to the previous established list
+tickers_list.extend(sp500_tickers)
+
+#Get your lookback period
+weektoMonth = lookBack*4
+
+#establish data time frame
+now = dt.datetime.now()
+start = now - dt.timedelta(weeks = weektoMonth)
+
+#Snag the SPX data to compare price to for RS
+market_data = pdr.DataReader("^GSPC",data_source='yahoo',start =start,end= now)
+market_data = market_data.reset_index(drop=False)
+
+#Seed out our basic variables
+message = ""
+rsnh_stocklist=[]
+rsnhbp_stocklist =[]
+threeWkTight = []
+
+#Here's the fun part Mass download all the data instead of just forlooping a query, super cool, but returns a multi level Dataframe
+data = yf.download(tickers_list,start = start, end = now, group_by = 'ticker', threads = True)
+
+#Breaks the Multiframe down into one large data frame with symbols bunched up by ticker name. If you print this now, it will be a massive list with 4 weeks of data per stock all stuck into one dataframe
+data = data.stack(level=0).rename_axis(['Date','Ticker']).reset_index(level=1)
+
+#Now we group the symbols together so we can actually read the data properly
+group = data.groupby("Ticker")
+
+#Things get delisted or change sometimes. This will pull all the error symbols out. We do this to filter later in order to not have an error inside our forloop
+missing = list(yf.shared._ERRORS.keys())
+
+#Thanks stack overflow for this super pythonic filter, as you can see I def did not come up with this line haha
+filterTickers = [x for x in tickers_list if x not in missing]
+
+for each in tqdm(filterTickers):
+	stock = each.upper()
+
+	#The get group command is awesome and why we grouped the names earlier, now we can grab a single dataframe per ticker from our massive data frame list
+	df = group.get_group(stock).reset_index()
+	try:
+		#Im only looking at stocks over $10, change this is you want something lower
+		if df['Adj Close'].iloc[-1] < 10:
+			continue
+
+		#Seed out the RS columns with all false statements to later change
+		df['rsnhbp'] = False
+		df['rsnh'] = False
+
+		#Calculate the RS
+		df['rs'] = df['Adj Close']/market_data['Adj Close']
+
+		#Get All time high RS based on the months to look back (the overall length of the data frame)
+		RS_All_Time_High = max(df['rs'])
+
+		#Begin to loop over to consider high price n RS
+		for p in range(len(df.index)):
+			#Skip first row
+			if p == 0:
+				continue
+
+			#Dirty way to get the offset dynamically changing to grab rs high n price high
+			#min Num counts up to 0, then iterates through the rest of the DF
+			minNum = max(min(p-63, 1000000), 0)
+			rsHigh = df.loc[minNum:p,'rs'].max()
+			priceHigh = df.loc[minNum:p,'High'].max()
+
+			#use above info to compare RS and High Price to establish whether its RS new high or RSNHBP
+			if df['rs'][p] >= rsHigh and df['High'][p] < priceHigh:
+				df.iloc[p,df.columns.get_loc('rsnhbp')] = True
+			elif df['rs'][p] == RS_All_Time_High:
+				df.iloc[p,df.columns.get_loc('rsnh')] = True
+
+		#Trim Dataframe based on user input
+		df_trimmed = df.tail(amount_weeks*5)
+
+		#Sum the total number of RS new highs and RSNHBP to allow for filtering
+		rsnhbp_count = df_trimmed.rsnhbp.sum()
+		rsnh_count = df_trimmed.rsnh.sum()
+
+		#Filter and seed out the message print
+		if rsnhbp_count >= user_filter or rsnh_count==1:
+
+			if rsnhbp_count <  user_filter:
+				rsnh_stocklist.append(stock)
+				message+=(stock+" has a RS New High in the last "+str(amount_weeks)+" week(s)\n")
+			elif rsnhbp_count >= user_filter:
+				rsnhbp_stocklist.append(stock)
+				message+=(stock+" has "+str(rsnhbp_count)+" RSNHBP in the last "+str(amount_weeks)+" week(s)\n")
+
+	except Exception:
+			print("No data on "+stock)
+
+#Print Message in Terminal
+print(message)
+
+#IF you want to save this to a text file, this will save it to your clipboard for a paste later. You can save it to a file, which I do, but the file structure changes per user.
+# if you need to know how to save it to a file, just let me know and I'll include that in a later update with a general explanation. 
+copyPaste = "RS New High Only List:\n"
+for x in rsnh_stocklist:
+	copyPaste+= x + " "
+copyPaste+="\n\nRSNHBP:\n"
+for x in rsnhbp_stocklist:
+	copyPaste+= x + " "
+pc.copy(copyPaste)
+print("RS Stock List has been copied to clipboard")
+
